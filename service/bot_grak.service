@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram bot grahovo news
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sedan/kovyaz/g
+ExecStart=/home/sedan/kovyaz/g/venv/bin/python3 main_grakhovo_news.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram bot paper's poster
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sedan/kovyaz/arxiv
+ExecStart=/home/sedan/kovyaz/g/venv/bin/python3 main.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram bot fin trader
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sedan/kovyaz/kassa_monitor
+ExecStart=/home/sedan/kovyaz/venv/bin/python3 fin_trader4.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

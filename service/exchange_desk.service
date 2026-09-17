@@ -1,0 +1,21 @@
+[Unit]
+Description=Exchange Ligovka Fintech CBR Crypto Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/excahnge
+Environment=PYTHONUNBUFFERED=1
+Environment=CHROME_BINARY=/opt/chrome-for-testing/chrome-linux64/chrome
+Environment=CHROMEDRIVER_BINARY=/opt/chrome-for-testing/chromedriver-linux64/chromedriver
+ExecStart=/root/excahnge/venv/bin/python /root/excahnge/exchange_ligov_fintex_cbr_crypto.py
+Restart=always
+RestartSec=10
+MemoryHigh=400M
+MemoryMax=512M
+OOMPolicy=kill
+
+[Install]
+WantedBy=multi-user.target

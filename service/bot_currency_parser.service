@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram bot currency parser
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sedan/kovyaz/auto
+ExecStart=/home/sedan/kovyaz/venv/bin/python3 currency_parser.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

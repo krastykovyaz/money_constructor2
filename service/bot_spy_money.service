@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram bot looking for euro in tg groups 
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sedan/kovyaz/euro_monitor
+ExecStart=/home/sedan/kovyaz/gosha/venv/bin/python3 spy_money_lux_fr.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+python-telegram-bot==13.15
+python-dotenv
+requests
+pytz
+beautifulsoup4
+lxml
+selenium==4.10.0
+
+# Compatibility requirements for python-telegram-bot 13.15 / APScheduler 3.6
+urllib3==1.26.20
+setuptools<81

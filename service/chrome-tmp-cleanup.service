@@ -1,0 +1,6 @@
+[Unit]
+Description=Clean up stale exchange-chrome temp profile dirs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /tmp -maxdepth 1 -name "exchange-chrome-*" -mmin +60 -exec rm -rf {} +

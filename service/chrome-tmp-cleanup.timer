@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly cleanup of stale exchange-chrome temp profile dirs
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram botwith gemini
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sedan/kovyaz/gosha
+ExecStart=/home/sedan/kovyaz/gosha/venv/bin/python3 gemini3.0.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
