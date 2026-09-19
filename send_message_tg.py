@@ -42,7 +42,7 @@ def send_message(chat_id: int,
         "Content-Type": "application/json"
     }
 
-    response = requests.get(URL_SEND_MESSAGE.format(TELEGRAM_TOKEN), headers=headers, data=json.dumps(payload))
+    response = requests.get(URL_SEND_MESSAGE.format(TELEGRAM_TOKEN), headers=headers, data=json.dumps(payload), timeout=10)
 
     response = response.json()
 

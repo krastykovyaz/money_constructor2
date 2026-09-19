@@ -18,6 +18,8 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
+from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown
+
 # Selenium setup
 DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
 DEFAULT_CHROMEDRIVER_BINARY = "/opt/chrome-for-testing/chromedriver-linux64/chromedriver"
@@ -83,6 +85,8 @@ disk_alert_sent = False
 FINTECH_FAIL_ALERT_THRESHOLD = 3
 fintech_fail_streak = 0
 
+rate_alert_cooldown = AlertCooldown(cooldown_seconds=300)
+
 def check_disk_space():
     global disk_alert_sent
     try:
@@ -133,14 +137,14 @@ def get_currency_cnbc(symbol):
         soup = BeautifulSoup(response.text, "html.parser")
         price_element = soup.find("span", class_="QuoteStrip-lastPrice")
         return float(price_element.text.strip()) if price_element else None
-    except:
+    except Exception:
         return None
 
 def get_binance_p2p():
     try:
         response = session.get(BINANCE_API_URL, params={'symbol': 'USDTRUB'}, timeout=10)
         return round(float(response.json()['price']), 2) if response.ok else None
-    except:
+    except Exception:
         return None
 
 def get_currency_data_fintech():
@@ -218,9 +222,6 @@ def get_currency_data_ligovka():
         print(f"[ERROR] Failed to parse Ligovka data: {e}")
         return []
 
-def parse_rate(value):
-    return float(value.replace(',', '.').replace(' ', ''))
-
 def round_buy_price(value):
     whole = int(value)
     fraction = round(value - whole, 10)
@@ -288,7 +289,8 @@ def update_message():
             message = "*📍 Online Курс:*\n"
             if usd_rub:
                 message += f"• *USD/RUB*: `{usd_rub:.2f}`\n"
-                if prev_val_dollar is not None and abs(prev_val_dollar - usd_rub) > 0.4:
+                if prev_val_dollar is not None and abs(prev_val_dollar - usd_rub) > 0.4 \
+                        and rate_alert_cooldown.should_send("online_usd"):
                     sed_message(f"Скоро обновится курс в кассе !\nПредыдущая цена - {prev_val_dollar}\nТекущая цена - {usd_rub}")
                 prev_val_dollar = usd_rub
             if usd_rub and eur_usd:
@@ -316,7 +318,8 @@ def update_message():
                 cur_item = item['currency']
                 if prev_fintech_data != {} and \
                     cur_item in prev_fintech_data and \
-                        abs(prev_fintech_data[cur_item] - cur_sale) > 0.2:
+                        abs(prev_fintech_data[cur_item] - cur_sale) > 0.2 and \
+                        rate_alert_cooldown.should_send(f"fintech_{cur_item}"):
                     old_val = prev_fintech_data[cur_item]
                     sed_message(f"Обновился курс в кассе по {cur_item}:\nПредыдущая цена - {old_val}\nТекущая цена - {cur_sale}")
                 prev_fintech_data[cur_item] = cur_sale
@@ -326,7 +329,7 @@ def update_message():
                 if cur_item.startswith(('USD', 'EUR')):
                     sell = round_sell_price(sell)
                 display_label = {'USD синий': 'USD/RUB', 'EUR': 'EUR/RUB'}.get(cur_item, cur_item)
-                message += f"• *{display_label}*\n  Покупка: `{buy:.2f}` | Продажа: `{sell:.2f}`\n\n"
+                message += f"• *{escape_markdown_legacy(display_label)}*\n  Покупка: `{buy:.2f}` | Продажа: `{sell:.2f}`\n\n"
                 if cur_item == 'USD синий':
                     our_rates['dollar'] = {'buy': buy, 'sell': sell}
                 elif cur_item == 'EUR':
@@ -362,14 +365,14 @@ def update_message():
                     try:
                         rate = float(session.get(BINANCE_API_URL, params={'symbol': symbol}, timeout=10).json()['price'])
                         message += f"• *{pair}*: `{rate}`\n"
-                    except:
+                    except Exception:
                         continue
                 message += "\n"
             # if binance_p2p:
             #     message += f"• *USD/RUB P2P*: `{binance_p2p}`\n\n"
             if cbr:
                 message += (
-                    f"*🏛 Курс ЦБ РФ (на {cbr['date']}):*\n"
+                    f"*🏛 Курс ЦБ РФ (на {escape_markdown_legacy(cbr['date'])}):*\n"
                     f"• USD/RUB: `{cbr['USD']:.2f}`\n"
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n\n"
                 )
@@ -385,6 +388,8 @@ def update_message():
             print(f"Update error: {e}")
 
         time.sleep(60)
+
+MAX_AMOUNT = 10_000_000
 
 CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT"}
 CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt"}
@@ -490,6 +495,9 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text("Введите корректное число.")
         return
     amount_value = float(amount)
+    if not (0 < amount_value <= MAX_AMOUNT):
+        update.message.reply_text(f"Введите сумму от 0 до {MAX_AMOUNT:.0f}.")
+        return
 
     state = user_data.pop(user_id, {})
     if state.get("mode") == "calc":
@@ -548,6 +556,9 @@ def handle_amount(update: Update, context: CallbackContext):
         )
     update.message.reply_text(f"{calculation}\n{delivery_status}")
 
+def on_error(update, context):
+    print(f"[ERROR] Unhandled exception in handler: {context.error}")
+
 def main():
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
@@ -555,6 +566,7 @@ def main():
     dp.add_handler(CommandHandler("currency", currency))
     dp.add_handler(CallbackQueryHandler(callback_handler))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_amount))
+    dp.add_error_handler(on_error)
 
     threading.Thread(target=update_message, daemon=True).start()
     updater.start_polling()

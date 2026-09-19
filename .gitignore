@@ -2,3 +2,9 @@
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Generated at runtime by the accounter/profile bots — not project data
+*.xlsx
+*.csv
+group_members.csv

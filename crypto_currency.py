@@ -26,7 +26,7 @@ def get_binance_rates():
     
     for pair, symbol in pairs_binance.items():
         params = {'symbol': symbol}
-        response = requests.get(BINANCE_API_URL, params=params)
+        response = requests.get(BINANCE_API_URL, params=params, timeout=10)
         
         if response.status_code == 200:
             data = response.json()

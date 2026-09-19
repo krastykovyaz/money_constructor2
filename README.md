@@ -8,7 +8,7 @@ services on this server.
 
 ## Setup
 
-Requires Python 3.12.
+Requires Python 3.10+ (deployed and tested on 3.10.12).
 
 ```bash
 python3 -m venv venv
@@ -80,7 +80,9 @@ the `CHROME_BINARY` / `CHROMEDRIVER_BINARY` env vars if installed elsewhere.
 
 ### Deploying as a systemd service
 
-`service/exchange_desk.service` matches what's deployed. Install it with:
+`service/exchange_desk.service` and `service/bot_all_exchange.service` match
+what's deployed — both `exchange_ligov_fintex_cbr_crypto.py` and
+`all_exchange.py` run as services on this host. Install either with:
 
 ```bash
 sudo cp service/exchange_desk.service /etc/systemd/system/
@@ -88,15 +90,24 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now exchange_desk.service
 ```
 
-Logs: `journalctl -u exchange_desk -f`. Journald retention on this host is
-capped to 3 days / 200MB via a drop-in at
+`service/chrome-tmp-cleanup.timer` runs hourly to remove stale Chrome
+profile temp dirs left behind by killed/crashed Selenium sessions:
+
+```bash
+sudo cp service/chrome-tmp-cleanup.service service/chrome-tmp-cleanup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now chrome-tmp-cleanup.timer
+```
+
+Logs: `journalctl -u exchange_desk -f` / `journalctl -u bot_all_exchange -f`.
+Journald retention on this host is capped to 3 days / 200MB via a drop-in at
 `/etc/systemd/journald.conf.d/retention.conf` (not part of this repo — a
 host-level setting).
 
 ## Other scripts
 
-The remaining top-level scripts (`accounter_bot*.py`, `all_exchange.py`,
-`currency_parser.py`, `sberexchange_bot.py`, etc.) and the other unit files
-under `service/` are earlier/related bots. They are not currently running on
-this server and aren't documented here in detail — check each script's
-source before deploying it.
+The remaining top-level scripts (`accounter_bot*.py`, `currency_parser.py`,
+`sberexchange_bot.py`, etc.) and the other unit files under `service/` are
+earlier/related bots. They are not currently running on this server and
+aren't documented here in detail — check each script's source before
+deploying it.

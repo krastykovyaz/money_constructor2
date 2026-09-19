@@ -8,7 +8,7 @@ def get_binance_p2p():
         'symbol': 'USDTRUB',
     }
 
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=10)
     data = response.json()
 
     if response.status_code == 200:
@@ -16,4 +16,5 @@ def get_binance_p2p():
     else:
         return None
 
-print(get_binance_p2p())
+if __name__ == '__main__':
+    print(get_binance_p2p())

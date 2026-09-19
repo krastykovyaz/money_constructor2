@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def get_member_ids(update: Update, context: CallbackContext):
     """Synchronous function to get all member IDs"""
-    if update.effective_user.id != ADMIN_ID:
+    if update.effective_user.id not in ADMIN_ID:
         update.message.reply_text("❌ Command restricted to admin")
         return
 

@@ -23,10 +23,11 @@ def get_currency_rates():
     return rates
 
 # Вывод данных каждую секунду
-try:
-    while True:
-        rates = get_currency_rates()
-        print(rates, f"{datetime.now().hour}:{datetime.now().minute}")
-        time.sleep(1)  # Задержка 1 секунда
-except KeyboardInterrupt:
-    print("Программа завершена.")
+if __name__ == '__main__':
+    try:
+        while True:
+            rates = get_currency_rates()
+            print(rates, f"{datetime.now().hour}:{datetime.now().minute}")
+            time.sleep(1)  # Задержка 1 секунда
+    except KeyboardInterrupt:
+        print("Программа завершена.")

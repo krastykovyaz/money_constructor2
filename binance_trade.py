@@ -31,4 +31,5 @@ async def get_currency_rates():
             print(f"Курс {symbol}: {price}")
 
 # Запуск WebSocket клиента
-asyncio.run(get_currency_rates())
+if __name__ == '__main__':
+    asyncio.run(get_currency_rates())

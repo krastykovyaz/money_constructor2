@@ -3,7 +3,7 @@ import requests
 def get_usd_rub_moex():
     url = "https://iss.moex.com/iss/engines/currency/markets/selt/securities.json?securities=USD000UTSTOM"
     
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     if response.status_code == 200:
         data = response.json()
         try:
@@ -14,5 +14,6 @@ def get_usd_rub_moex():
             return None
     return None
 
-rate = get_usd_rub_moex()
-print(f"Текущий курс USD/RUB (MOEX): {rate}")
+if __name__ == '__main__':
+    rate = get_usd_rub_moex()
+    print(f"Текущий курс USD/RUB (MOEX): {rate}")
