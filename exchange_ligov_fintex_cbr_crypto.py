@@ -59,7 +59,10 @@ def sed_message(MESSAGE):
     for CHAT_ID in (OPERATOR_CHAT_ID,):
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         data = {"chat_id": CHAT_ID, "text": MESSAGE}
-        requests.post(url, json=data)
+        try:
+            requests.post(url, json=data, timeout=10)
+        except requests.RequestException as e:
+            print(f"[ERROR] Failed to notify chat {CHAT_ID}: {type(e).__name__}")
         time.sleep(1)
 
 load_dotenv()
@@ -488,7 +491,7 @@ def handle_amount(update: Update, context: CallbackContext):
         return
     amount_value = float(amount)
 
-    state = user_data.get(user_id, {})
+    state = user_data.pop(user_id, {})
     if state.get("mode") == "calc":
         with last_message_lock:
             rates = dict(current_order_rates)
@@ -520,7 +523,6 @@ def handle_amount(update: Update, context: CallbackContext):
     elif rate_key:
         calculation = "\nКурс пока обновляется. Оператор уточнит расчет.\n"
 
-    print(update.message.from_user)
     if update.message.from_user.username is not None:
         username = f"@{update.message.from_user.username}\n"
     else:

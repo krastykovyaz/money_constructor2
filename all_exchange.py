@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 import threading
 import requests
 import time
@@ -35,19 +37,31 @@ def get_driver():
     options.add_argument("--renderer-process-limit=1")
     options.add_argument("--blink-settings=imagesEnabled=false")
     options.add_argument("--js-flags=--max-old-space-size=128")
+    user_data_dir = tempfile.mkdtemp(prefix='exchange-chrome-')
+    options.add_argument(f"--user-data-dir={user_data_dir}")
     chrome_binary = os.environ.get("CHROME_BINARY", DEFAULT_CHROME_BINARY)
     if os.path.exists(chrome_binary):
         options.binary_location = chrome_binary
     chromedriver_binary = os.environ.get("CHROMEDRIVER_BINARY", DEFAULT_CHROMEDRIVER_BINARY)
     service = Service(executable_path=chromedriver_binary) if os.path.exists(chromedriver_binary) else None
-    return webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
+    try:
+        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
+    except Exception:
+        shutil.rmtree(user_data_dir, ignore_errors=True)
+        raise
+    driver.set_page_load_timeout(20)
+    driver.exchange_user_data_dir = user_data_dir
+    return driver
 
 def sed_message(MESSAGE):
     CHAT_IDS = [8159819525]
     for CHAT_ID in CHAT_IDS:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         data = {"chat_id": CHAT_ID, "text": MESSAGE}
-        requests.post(url, json=data)
+        try:
+            requests.post(url, json=data, timeout=10)
+        except requests.RequestException as e:
+            print(f"[ERROR] Failed to notify chat {CHAT_ID}: {type(e).__name__}")
         time.sleep(1)
 
 session = requests.Session()
@@ -101,12 +115,12 @@ def get_binance_p2p():
         return None
 
 def get_currency_data_fintech():
+    driver = None
     try:
         driver = get_driver()
         driver.get("https://fintech-exchange.ru/")
         time.sleep(5)
         soup = BeautifulSoup(driver.page_source, "html.parser")
-        driver.quit()
 
         table = soup.find("table")
         rows = table.find_all("tr")[1:] if table else []
@@ -133,6 +147,16 @@ def get_currency_data_fintech():
         return currency_cache
     except Exception as e:
         print(f"[ERROR] Failed to fetch data: {e}")
+        return currency_cache
+    finally:
+        if driver is not None:
+            user_data_dir = getattr(driver, "exchange_user_data_dir", None)
+            try:
+                driver.quit()
+            except Exception:
+                pass
+            if user_data_dir:
+                shutil.rmtree(user_data_dir, ignore_errors=True)
 
 
 def update_message():
@@ -244,8 +268,7 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text("Обмен производится от 5000у.е.")
         return
 
-    category = user_data.get(user_id, {}).get("category", "Неизвестная категория")
-    print(update.message.from_user)
+    category = user_data.pop(user_id, {}).get("category", "Неизвестная категория")
     if update.message.from_user.username is not None:
         username = f"@{update.message.from_user.username}\n"
     else:
