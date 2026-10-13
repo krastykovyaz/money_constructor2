@@ -75,7 +75,7 @@ session.headers.update({"User-Agent": "Mozilla/5.0"})
 last_message_lock = threading.Lock()
 last_message = ""
 user_data = {}
-current_order_rates = {"dollar": None, "euro": None, "usdt": None}
+current_order_rates = {"dollar": None, "euro": None, "usdt": None, "gbp": None}
 prev_val_dollar = None
 prev_fintech_data = {}
 
@@ -386,12 +386,17 @@ def update_message():
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
                     f"{gbp_line}\n"
                 )
+            gbp_rate = None
+            if usd_rub and gbp_usd:
+                gbp_rub = gbp_usd * usd_rub
+                gbp_rate = {'buy': gbp_rub, 'sell': gbp_rub}
             with last_message_lock:
                 last_message = message
                 current_order_rates = {
                     'dollar': our_rates.get('dollar'),
                     'euro': our_rates.get('euro'),
                     'usdt': usdt_rates.get('usd'),
+                    'gbp': gbp_rate,
                 }
             print('Updated currency at', datetime.now())
         except Exception as e:
@@ -401,8 +406,8 @@ def update_message():
 
 MAX_AMOUNT = 10_000_000
 
-CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT"}
-CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt"}
+CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT", "gbp": "GBP"}
+CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt", "gbp": "gbp"}
 
 def convert_currency(amount, from_currency, rates):
     def rate_for(currency):
@@ -427,7 +432,7 @@ def convert_currency(amount, from_currency, rates):
 def format_calc_reply(amount, from_currency, results):
     lines = [f"💱 {amount:.2f} {CALC_CURRENCY_LABELS[from_currency]} =\n"]
     missing = []
-    for currency in ("rub", "usd", "eur", "usdt"):
+    for currency in ("rub", "usd", "eur", "usdt", "gbp"):
         if currency == from_currency:
             continue
         value = results.get(currency)
@@ -471,6 +476,7 @@ def calc_start(update: Update, context: CallbackContext):
         [InlineKeyboardButton("💵 USD", callback_data="calc_usd")],
         [InlineKeyboardButton("💶 EUR", callback_data="calc_eur")],
         [InlineKeyboardButton("🪙 USDT", callback_data="calc_usdt")],
+        [InlineKeyboardButton("💷 GBP", callback_data="calc_gbp")],
     ]
     query.message.reply_text("Из какой валюты считаем?", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -487,7 +493,7 @@ def callback_handler(update: Update, context: CallbackContext):
         order_start(update, context)
     elif query.data == "calc_open":
         calc_start(update, context)
-    elif query.data in ("calc_rub", "calc_usd", "calc_eur", "calc_usdt"):
+    elif query.data in ("calc_rub", "calc_usd", "calc_eur", "calc_usdt", "calc_gbp"):
         calc_pick_currency(update, context)
     elif query.data.endswith("_choice"):
         ask_amount(update, context)
