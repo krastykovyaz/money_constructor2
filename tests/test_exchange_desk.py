@@ -49,8 +49,8 @@ def test_round_sell_price_rounds_to_nearest_half():
     assert desk.round_sell_price(84.26) == 84.5
 
 
-def _rates(dollar=None, euro=None, usdt=None):
-    return {"dollar": dollar, "euro": euro, "usdt": usdt}
+def _rates(dollar=None, euro=None, usdt=None, gbp=None):
+    return {"dollar": dollar, "euro": euro, "usdt": usdt, "gbp": gbp}
 
 
 def test_convert_currency_full_rates_returns_all_currencies():
@@ -89,7 +89,21 @@ def test_convert_currency_degrades_gracefully_when_one_rate_missing():
 
 
 def test_format_calc_reply_flags_missing_currency():
-    results = {"rub": 9700.0, "usd": 114.12, "usdt": None}
+    results = {"rub": 9700.0, "usd": 114.12, "usdt": None, "gbp": 87.4}
     text = desk.format_calc_reply(100, "eur", results)
     assert "114.12 USD" in text
     assert "USDT пока недоступен" in text
+
+
+def test_convert_currency_from_and_to_gbp():
+    rates = _rates(dollar={"buy": 84.0, "sell": 85.0}, gbp={"buy": 111.0, "sell": 111.0})
+    from_gbp = desk.convert_currency(10, "gbp", rates)
+    assert from_gbp["rub"] == 1110
+    assert from_gbp["usd"] == pytest.approx(1110 / 85.0)
+    assert from_gbp["eur"] is None
+    to_gbp = desk.convert_currency(1110, "rub", rates)
+    assert to_gbp["gbp"] == pytest.approx(10)
+
+
+def test_convert_currency_gbp_unavailable_returns_none():
+    assert desk.convert_currency(10, "gbp", _rates(dollar={"buy": 84.0, "sell": 85.0})) is None

@@ -18,7 +18,7 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown
+from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate
 
 # Selenium setup
 DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
@@ -75,7 +75,7 @@ session.headers.update({"User-Agent": "Mozilla/5.0"})
 last_message_lock = threading.Lock()
 last_message = ""
 user_data = {}
-current_order_rates = {"dollar": None, "euro": None, "usdt": None}
+current_order_rates = {"dollar": None, "euro": None, "usdt": None, "gbp": None}
 prev_val_dollar = None
 prev_fintech_data = {}
 
@@ -125,7 +125,8 @@ def get_cbr_currency():
             return {
                 "date": date,
                 "USD": usd_value,
-                "EUR": eur_value
+                "EUR": eur_value,
+                "GBP": cbr_valute_rate(soup, "R01035"),
             }
     except Exception as e:
         print(f"Error fetching CBR data: {e}")
@@ -283,6 +284,7 @@ def update_message():
             ligovka_data = get_currency_data_ligovka() or []
             usd_rub = get_currency_cnbc("RUB=")
             eur_usd = get_currency_cnbc("EUR=")
+            gbp_usd = get_currency_cnbc("GBP=")
             binance_p2p = get_binance_p2p()
             cbr = get_cbr_currency()
 
@@ -296,7 +298,13 @@ def update_message():
             if usd_rub and eur_usd:
                 message += f"• *EUR/RUB*: `{eur_usd * usd_rub:.2f}`\n"
             if eur_usd:
-                message += f"• *EUR/USD*: `{eur_usd:.4f}`\n\n"
+                message += f"• *EUR/USD*: `{eur_usd:.4f}`\n"
+            if usd_rub and gbp_usd:
+                message += f"• *GBP/RUB*: `{gbp_usd * usd_rub:.2f}`\n"
+            if gbp_usd:
+                message += f"• *GBP/USD*: `{gbp_usd:.4f}`\n"
+            if eur_usd or gbp_usd:
+                message += "\n"
 
             selected_rates = choose_exchange_rates(fintech_data["data"], ligovka_data)
             selected_rates = [
@@ -371,17 +379,24 @@ def update_message():
             # if binance_p2p:
             #     message += f"• *USD/RUB P2P*: `{binance_p2p}`\n\n"
             if cbr:
+                gbp_line = f"• GBP/RUB: `{cbr['GBP']:.2f}`\n" if cbr.get("GBP") else ""
                 message += (
                     f"*🏛 Курс ЦБ РФ (на {escape_markdown_legacy(cbr['date'])}):*\n"
                     f"• USD/RUB: `{cbr['USD']:.2f}`\n"
-                    f"• EUR/RUB: `{cbr['EUR']:.2f}`\n\n"
+                    f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
+                    f"{gbp_line}\n"
                 )
+            gbp_rate = None
+            if usd_rub and gbp_usd:
+                gbp_rub = gbp_usd * usd_rub
+                gbp_rate = {'buy': gbp_rub, 'sell': gbp_rub}
             with last_message_lock:
                 last_message = message
                 current_order_rates = {
                     'dollar': our_rates.get('dollar'),
                     'euro': our_rates.get('euro'),
                     'usdt': usdt_rates.get('usd'),
+                    'gbp': gbp_rate,
                 }
             print('Updated currency at', datetime.now())
         except Exception as e:
@@ -391,8 +406,8 @@ def update_message():
 
 MAX_AMOUNT = 10_000_000
 
-CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT"}
-CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt"}
+CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT", "gbp": "GBP"}
+CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt", "gbp": "gbp"}
 
 def convert_currency(amount, from_currency, rates):
     def rate_for(currency):
@@ -417,7 +432,7 @@ def convert_currency(amount, from_currency, rates):
 def format_calc_reply(amount, from_currency, results):
     lines = [f"💱 {amount:.2f} {CALC_CURRENCY_LABELS[from_currency]} =\n"]
     missing = []
-    for currency in ("rub", "usd", "eur", "usdt"):
+    for currency in ("rub", "usd", "eur", "usdt", "gbp"):
         if currency == from_currency:
             continue
         value = results.get(currency)
@@ -461,6 +476,7 @@ def calc_start(update: Update, context: CallbackContext):
         [InlineKeyboardButton("💵 USD", callback_data="calc_usd")],
         [InlineKeyboardButton("💶 EUR", callback_data="calc_eur")],
         [InlineKeyboardButton("🪙 USDT", callback_data="calc_usdt")],
+        [InlineKeyboardButton("💷 GBP", callback_data="calc_gbp")],
     ]
     query.message.reply_text("Из какой валюты считаем?", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -477,7 +493,7 @@ def callback_handler(update: Update, context: CallbackContext):
         order_start(update, context)
     elif query.data == "calc_open":
         calc_start(update, context)
-    elif query.data in ("calc_rub", "calc_usd", "calc_eur", "calc_usdt"):
+    elif query.data in ("calc_rub", "calc_usd", "calc_eur", "calc_usdt", "calc_gbp"):
         calc_pick_currency(update, context)
     elif query.data.endswith("_choice"):
         ask_amount(update, context)

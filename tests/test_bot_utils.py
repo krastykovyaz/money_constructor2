@@ -62,3 +62,25 @@ def test_alert_cooldown_allows_after_window_elapses(monkeypatch):
     assert cooldown.should_send("usd") is False
     fake_time[0] += 6
     assert cooldown.should_send("usd") is True
+
+
+def _cbr_soup(xml):
+    from bs4 import BeautifulSoup
+    return BeautifulSoup(xml, "lxml-xml")
+
+
+def test_cbr_valute_rate_divides_by_nominal():
+    from bot_utils import cbr_valute_rate
+    soup = _cbr_soup(
+        '<ValCurs><Valute ID="R01035"><Nominal>1</Nominal><Value>110,9780</Value></Valute>'
+        '<Valute ID="R01720"><Nominal>10</Nominal><Value>20,0000</Value></Valute></ValCurs>'
+    )
+    assert cbr_valute_rate(soup, "R01035") == pytest.approx(110.978)
+    assert cbr_valute_rate(soup, "R01720") == pytest.approx(2.0)
+
+
+def test_cbr_valute_rate_missing_or_malformed_returns_none():
+    from bot_utils import cbr_valute_rate
+    soup = _cbr_soup('<ValCurs><Valute ID="R01035"><Nominal>1</Nominal><Value>n/a</Value></Valute></ValCurs>')
+    assert cbr_valute_rate(soup, "R01035") is None
+    assert cbr_valute_rate(soup, "R99999") is None

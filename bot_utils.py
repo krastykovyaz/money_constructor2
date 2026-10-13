@@ -31,3 +31,14 @@ class AlertCooldown:
             return False
         self._last_sent[key] = now
         return True
+
+
+def cbr_valute_rate(soup, valute_id):
+    """Rub per 1 unit of a CBR XML_daily currency, or None if absent/malformed."""
+    valute = soup.find('Valute', ID=valute_id)
+    if valute is None:
+        return None
+    try:
+        return parse_rate(valute.Value.text) / parse_rate(valute.Nominal.text)
+    except (AttributeError, ValueError, ZeroDivisionError):
+        return None

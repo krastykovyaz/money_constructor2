@@ -17,7 +17,7 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown
+from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate
 
 load_dotenv()
 TOKEN = os.environ["ALL_EXCHANGE_BOT_TOKEN"]
@@ -98,7 +98,8 @@ def get_cbr_currency():
             return {
                 "date": date,
                 "USD": usd_value,
-                "EUR": eur_value
+                "EUR": eur_value,
+                "GBP": cbr_valute_rate(soup, "R01035"),
             }
     except Exception as e:
         print(f"Error fetching CBR data: {e}")
@@ -174,6 +175,7 @@ def update_message():
             fintech_data = get_currency_data_fintech()
             usd_rub = get_currency_cnbc("RUB=")
             eur_usd = get_currency_cnbc("EUR=")
+            gbp_usd = get_currency_cnbc("GBP=")
             binance_p2p = get_binance_p2p()
             cbr = get_cbr_currency()
 
@@ -187,7 +189,13 @@ def update_message():
             if usd_rub and eur_usd:
                 message += f"• *EUR/RUB*: `{eur_usd * usd_rub:.2f}`\n"
             if eur_usd:
-                message += f"• *EUR/USD*: `{eur_usd:.4f}`\n\n"
+                message += f"• *EUR/USD*: `{eur_usd:.4f}`\n"
+            if usd_rub and gbp_usd:
+                message += f"• *GBP/RUB*: `{gbp_usd * usd_rub:.2f}`\n"
+            if gbp_usd:
+                message += f"• *GBP/USD*: `{gbp_usd:.4f}`\n"
+            if eur_usd or gbp_usd:
+                message += "\n"
 
             if any(fintech_data["data"]):
                 message += "*🏦 Наш Курс:* __(от 5000 y.e.)__\n"
@@ -222,10 +230,12 @@ def update_message():
             # if binance_p2p:
             #     message += f"• *USD/RUB P2P*: `{binance_p2p}`\n\n"
             if cbr:
+                gbp_line = f"• GBP/RUB: `{cbr['GBP']:.2f}`\n" if cbr.get("GBP") else ""
                 message += (
                     f"*🏛 Курс ЦБ РФ (на {escape_markdown_legacy(cbr['date'])}):*\n"
                     f"• USD/RUB: `{cbr['USD']:.2f}`\n"
-                    f"• EUR/RUB: `{cbr['EUR']:.2f}`\n\n"
+                    f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
+                    f"{gbp_line}\n"
                 )
             with last_message_lock:
                 last_message = message
