@@ -109,12 +109,14 @@ def test_convert_currency_gbp_unavailable_returns_none():
     assert desk.convert_currency(10, "gbp", _rates(dollar={"buy": 84.0, "sell": 85.0})) is None
 
 
-def test_gbp_calculator_rate_is_gbp_usd_times_usd_rub_plus_6_percent():
-    rate = desk.gbp_calculator_rate(1.3, 80.0)  # 104.0 RUB * 1.06 = 110.24 -> 110.0
-    assert rate["sell"] == 110.0
-    assert rate["buy"] == pytest.approx(104.0)
+def test_gbp_calculator_rate_is_ligovka_euro_plus_6_percent_in_gbp_unrounded():
+    # 1 GBP = 1.3 / 1.0 = 1.3 EUR; 1.3 * 100 = 130 RUB; * 1.06 = 137.8 (no rounding)
+    rate = desk.gbp_calculator_rate(1.3, 1.0, 100.0)
+    assert rate["sell"] == pytest.approx(137.8)
+    assert rate["buy"] == pytest.approx(130.0)
 
 
 def test_gbp_calculator_rate_none_without_inputs():
-    assert desk.gbp_calculator_rate(None, 80.0) is None
-    assert desk.gbp_calculator_rate(1.3, None) is None
+    assert desk.gbp_calculator_rate(None, 1.1, 97.8) is None
+    assert desk.gbp_calculator_rate(1.3, None, 97.8) is None
+    assert desk.gbp_calculator_rate(1.3, 1.1, None) is None

@@ -235,11 +235,14 @@ def round_sell_price(value):
 
 GBP_MARKUP = 1.06
 
-def gbp_calculator_rate(gbp_usd, usd_rub):
-    if not gbp_usd or not usd_rub:
+def gbp_calculator_rate(gbp_usd, eur_usd, ligovka_eur_sale):
+    if not gbp_usd or not eur_usd or not ligovka_eur_sale:
         return None
-    gbp_rub = gbp_usd * usd_rub
-    return {'buy': gbp_rub, 'sell': round_sell_price(gbp_rub * GBP_MARKUP)}
+    gbp_in_eur = gbp_usd / eur_usd
+    return {
+        'buy': gbp_in_eur * ligovka_eur_sale,
+        'sell': gbp_in_eur * ligovka_eur_sale * GBP_MARKUP,
+    }
 
 def choose_exchange_rates(fintech_data, ligovka_data):
     ligovka_by_currency = {}
@@ -394,7 +397,10 @@ def update_message():
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
                     f"{gbp_line}\n"
                 )
-            gbp_rate = gbp_calculator_rate(gbp_usd, usd_rub)
+            eur_ligovka = next((item for item in ligovka_data if item['currency'] == 'EUR (от 1)'), None)
+            gbp_rate = gbp_calculator_rate(
+                gbp_usd, eur_usd, parse_rate(eur_ligovka['sale']) if eur_ligovka else None
+            )
             with last_message_lock:
                 last_message = message
                 current_order_rates = {
