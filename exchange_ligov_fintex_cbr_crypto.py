@@ -75,7 +75,8 @@ session.headers.update({"User-Agent": "Mozilla/5.0"})
 last_message_lock = threading.Lock()
 last_message = ""
 user_data = {}
-current_order_rates = {"dollar": None, "euro": None, "usdt": None, "gbp": None}
+current_order_rates = {"dollar": None, "euro": None, "usdt": None}
+current_calc_rates = {"dollar": None, "euro": None, "usdt": None, "gbp": None}
 prev_val_dollar = None
 prev_fintech_data = {}
 
@@ -235,11 +236,14 @@ def round_sell_price(value):
 
 GBP_MARKUP = 1.06
 
-def gbp_calculator_rate(gbp_usd, usd_rub):
-    if not gbp_usd or not usd_rub:
+def gbp_calculator_rate(gbp_usd, eur_usd, ligovka_eur_sale):
+    if not gbp_usd or not eur_usd or not ligovka_eur_sale:
         return None
-    gbp_rub = gbp_usd * usd_rub
-    return {'buy': gbp_rub, 'sell': round_sell_price(gbp_rub * GBP_MARKUP)}
+    gbp_in_eur = gbp_usd / eur_usd
+    return {
+        'buy': gbp_in_eur * ligovka_eur_sale,
+        'sell': gbp_in_eur * ligovka_eur_sale * GBP_MARKUP,
+    }
 
 def choose_exchange_rates(fintech_data, ligovka_data):
     ligovka_by_currency = {}
@@ -283,6 +287,7 @@ def choose_exchange_rates(fintech_data, ligovka_data):
 def update_message():
     global last_message
     global current_order_rates
+    global current_calc_rates
     global prev_val_dollar
     global prev_fintech_data
     while True:
@@ -328,6 +333,7 @@ def update_message():
             if selected_rates:
                 message += "*🏦 Текущий курс:* __на счет EU/US__\n"
             our_rates = {}
+            exact_rates = {}
             for item in selected_rates:
                 cur_sale = parse_rate(str(item['sale']))
                 cur_buy = parse_rate(str(item['purchase']))
@@ -346,10 +352,13 @@ def update_message():
                     sell = round_sell_price(sell)
                 display_label = {'USD синий': 'USD/RUB', 'EUR': 'EUR/RUB'}.get(cur_item, cur_item)
                 message += f"• *{escape_markdown_legacy(display_label)}*\n  Покупка: `{buy:.2f}` | Продажа: `{sell:.2f}`\n\n"
+                exact_sell = cur_sale * 1.06 if cur_item.startswith(('USD', 'EUR')) else cur_sale
                 if cur_item == 'USD синий':
                     our_rates['dollar'] = {'buy': buy, 'sell': sell}
+                    exact_rates['dollar'] = {'buy': cur_buy, 'sell': exact_sell}
                 elif cur_item == 'EUR':
                     our_rates['euro'] = {'buy': buy, 'sell': sell}
+                    exact_rates['euro'] = {'buy': cur_buy, 'sell': exact_sell}
 
             usd_ligovka = next((item for item in ligovka_data if item['currency'] == 'USD (от 1)'), None)
             eur_usd_ligovka = next((item for item in ligovka_data if item['currency'] == 'EUR/USD (от 1)'), None)
@@ -394,12 +403,20 @@ def update_message():
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
                     f"{gbp_line}\n"
                 )
-            gbp_rate = gbp_calculator_rate(gbp_usd, usd_rub)
+            eur_ligovka = next((item for item in ligovka_data if item['currency'] == 'EUR (от 1)'), None)
+            gbp_rate = gbp_calculator_rate(
+                gbp_usd, eur_usd, parse_rate(eur_ligovka['sale']) if eur_ligovka else None
+            )
             with last_message_lock:
                 last_message = message
                 current_order_rates = {
                     'dollar': our_rates.get('dollar'),
                     'euro': our_rates.get('euro'),
+                    'usdt': usdt_rates.get('usd'),
+                }
+                current_calc_rates = {
+                    'dollar': exact_rates.get('dollar'),
+                    'euro': exact_rates.get('euro'),
                     'usdt': usdt_rates.get('usd'),
                     'gbp': gbp_rate,
                 }
@@ -523,7 +540,7 @@ def handle_amount(update: Update, context: CallbackContext):
     state = user_data.pop(user_id, {})
     if state.get("mode") == "calc":
         with last_message_lock:
-            rates = dict(current_order_rates)
+            rates = dict(current_calc_rates)
         results = convert_currency(amount_value, state["currency"], rates)
         if results is None:
             update.message.reply_text("Курс пока обновляется, попробуйте чуть позже.")
