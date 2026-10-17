@@ -17,7 +17,7 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate
+from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate, telegram_send
 
 load_dotenv()
 TOKEN = os.environ["ALL_EXCHANGE_BOT_TOKEN"]
@@ -55,16 +55,14 @@ def get_driver():
     driver.exchange_user_data_dir = user_data_dir
     return driver
 
+OPERATOR_CHAT_ID = int(os.environ.get("OPERATOR_CHAT_ID", "8159819525"))
+OPERATOR_CONTACT = "@oolyasya"
+
 def sed_message(MESSAGE):
-    CHAT_IDS = [8159819525]
-    for CHAT_ID in CHAT_IDS:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        data = {"chat_id": CHAT_ID, "text": MESSAGE}
-        try:
-            requests.post(url, json=data, timeout=10)
-        except requests.RequestException as e:
-            print(f"[ERROR] Failed to notify chat {CHAT_ID}: {type(e).__name__}")
-        time.sleep(1)
+    ok, error = telegram_send(TOKEN, OPERATOR_CHAT_ID, MESSAGE)
+    if not ok:
+        print(f"[ERROR] Failed to notify chat {OPERATOR_CHAT_ID}: {error}")
+    time.sleep(1)
 
 session = requests.Session()
 session.headers.update({"User-Agent": "Mozilla/5.0"})
@@ -305,13 +303,20 @@ def handle_amount(update: Update, context: CallbackContext):
         f"Категория: {category}\n"
         f"Сумма: {amount}"
     )
-    if username == 'username':
-        # update.message.reply_text("✅ У Вас не указан username напишите по заказу [оператору](https://t.me/oolyasya)",parse_mode="MarkdownV2")
-        update.message.reply_text("✅ У Вас не указан username напишите по заказу оператору - @oolyasya")
-    else:
-        update.message.reply_text("✅ Заказ отправлен оператору - @oolyasya")
     print(message)
-    context.bot.send_message(chat_id=8159819525, text=message)
+    try:
+        context.bot.send_message(chat_id=OPERATOR_CHAT_ID, text=message)
+    except Exception as e:
+        print(f"Operator notification error: {e}")
+        update.message.reply_text(
+            "⚠️ Не удалось отправить заказ оператору.\n"
+            f"Напишите, пожалуйста, напрямую оператору - {OPERATOR_CONTACT}"
+        )
+        return
+    if username == 'username':
+        update.message.reply_text(f"✅ У Вас не указан username напишите по заказу оператору - {OPERATOR_CONTACT}")
+    else:
+        update.message.reply_text(f"✅ Заказ отправлен оператору - {OPERATOR_CONTACT}")
 
 def on_error(update, context):
     print(f"[ERROR] Unhandled exception in handler: {context.error}")

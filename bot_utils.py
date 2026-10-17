@@ -42,3 +42,35 @@ def cbr_valute_rate(soup, valute_id):
         return parse_rate(valute.Value.text) / parse_rate(valute.Nominal.text)
     except (AttributeError, ValueError, ZeroDivisionError):
         return None
+
+
+def validate_operator_chat_id(chat_id, bot_token):
+    """Fail fast on a missing operator chat or the bot's own ID (Telegram bots can't message bots)."""
+    if not chat_id:
+        raise ValueError("OPERATOR_CHAT_ID is not set")
+    try:
+        chat_id = int(chat_id)
+    except (TypeError, ValueError):
+        raise ValueError("OPERATOR_CHAT_ID must be a numeric Telegram chat ID")
+    if str(chat_id) == str(bot_token).split(":", 1)[0]:
+        raise ValueError("OPERATOR_CHAT_ID is the bot's own ID; use the operator's chat ID")
+    return chat_id
+
+
+def telegram_send(token, chat_id, text, timeout=10):
+    """POST sendMessage; returns (ok, error_description). Never logs or returns the URL/token."""
+    import requests
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=timeout,
+        )
+    except requests.RequestException as e:
+        return False, type(e).__name__
+    if response.ok:
+        return True, None
+    try:
+        return False, response.json().get("description", f"HTTP {response.status_code}")
+    except ValueError:
+        return False, f"HTTP {response.status_code}"

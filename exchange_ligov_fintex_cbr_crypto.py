@@ -18,7 +18,10 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate
+from bot_utils import (
+    escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate,
+    telegram_send, validate_operator_chat_id,
+)
 
 # Selenium setup
 DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
@@ -59,12 +62,9 @@ def get_driver():
 
 def sed_message(MESSAGE):
     for CHAT_ID in (OPERATOR_CHAT_ID,):
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {"chat_id": CHAT_ID, "text": MESSAGE}
-        try:
-            requests.post(url, json=data, timeout=10)
-        except requests.RequestException as e:
-            print(f"[ERROR] Failed to notify chat {CHAT_ID}: {type(e).__name__}")
+        ok, error = telegram_send(BOT_TOKEN, CHAT_ID, MESSAGE)
+        if not ok:
+            print(f"[ERROR] Failed to notify chat {CHAT_ID}: {error}")
         time.sleep(1)
 
 load_dotenv()
@@ -106,7 +106,7 @@ def check_disk_space():
 BINANCE_API_URL = "https://api.binance.com/api/v3/ticker/price"
 pairs_binance = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
 LIGOVKA_URL = "https://ligovka.ru/"
-OPERATOR_CHAT_ID = int(os.environ.get("OPERATOR_CHAT_ID", "8773698197"))
+OPERATOR_CHAT_ID = os.environ.get("OPERATOR_CHAT_ID")
 OPERATOR_CONTACT = "@niccolomachiavelli1469"
 currency_cache = {
     "data": [],
@@ -598,6 +598,8 @@ def on_error(update, context):
     print(f"[ERROR] Unhandled exception in handler: {context.error}")
 
 def main():
+    global OPERATOR_CHAT_ID
+    OPERATOR_CHAT_ID = validate_operator_chat_id(OPERATOR_CHAT_ID, BOT_TOKEN)
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", currency))
