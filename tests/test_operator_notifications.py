@@ -75,7 +75,7 @@ class FakeBot:
 
 
 def _run_all_exchange(fail):
-    all_exchange.user_data[7] = {"category": "blue_choice"}
+    all_exchange.user_data.set(7, {"category": "blue_choice"})
     message, bot = FakeMessage("6000"), FakeBot(fail=fail)
     all_exchange.handle_amount(
         type("Upd", (), {"message": message})(), type("Ctx", (), {"bot": bot})()

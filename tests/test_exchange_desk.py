@@ -120,3 +120,20 @@ def test_gbp_calculator_rate_none_without_inputs():
     assert desk.gbp_calculator_rate(None, 1.1, 97.8) is None
     assert desk.gbp_calculator_rate(1.3, None, 97.8) is None
     assert desk.gbp_calculator_rate(1.3, 1.1, None) is None
+
+
+def test_choose_exchange_rates_current_sell_selection_is_pinned():
+    # Characterization test, not an endorsement: USD takes the LOWER of fintech/Ligovka
+    # sale while EUR takes the HIGHER (the `currency == 'USD'` check never matches the
+    # real "USD синий" label). Pinned so any pricing change is deliberate.
+    ligovka = [
+        {"currency": "USD (от 1)", "purchase": "85.00", "sale": "88.00"},
+        {"currency": "EUR (от 1)", "purchase": "95.00", "sale": "99.00"},
+    ]
+    fintech = [
+        {"currency": "USD синий", "purchase": "86.00", "sale": "87.00"},
+        {"currency": "EUR", "purchase": "96.00", "sale": "98.00"},
+    ]
+    chosen = {c["currency"]: c for c in desk.choose_exchange_rates(fintech, ligovka)}
+    assert chosen["USD синий"]["sale"] == 87.00
+    assert chosen["EUR"]["sale"] == 99.00

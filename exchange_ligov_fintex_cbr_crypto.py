@@ -3,15 +3,11 @@ import math
 import os
 import requests
 import shutil
-import tempfile
 import time
 import re
 import pytz
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -19,46 +15,10 @@ from telegram.ext import (
 )
 
 from bot_utils import (
-    escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate,
-    telegram_send, validate_operator_chat_id,
+    escape_markdown_legacy, parse_rate, try_parse_rate, AlertCooldown, ConversationState,
+    telegram_send, updated_at_line, validate_operator_chat_id,
 )
-
-# Selenium setup
-DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
-DEFAULT_CHROMEDRIVER_BINARY = "/opt/chrome-for-testing/chromedriver-linux64/chromedriver"
-
-def get_driver():
-    options = Options()
-    options.page_load_strategy = "eager"
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-software-rasterizer")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-features=site-per-process")
-    options.add_argument("--renderer-process-limit=1")
-    options.add_argument("--blink-settings=imagesEnabled=false")
-    options.add_argument("--js-flags=--max-old-space-size=128")
-    user_data_dir = tempfile.mkdtemp(prefix='exchange-chrome-')
-    options.add_argument(f"--user-data-dir={user_data_dir}")
-    chrome_binary = os.environ.get("CHROME_BINARY", DEFAULT_CHROME_BINARY)
-    if not os.path.exists(chrome_binary):
-        shutil.rmtree(user_data_dir, ignore_errors=True)
-        raise RuntimeError(
-            f"Chrome binary not found at {chrome_binary}. Install it or set CHROME_BINARY."
-        )
-    options.binary_location = chrome_binary
-    chromedriver_binary = os.environ.get("CHROMEDRIVER_BINARY", DEFAULT_CHROMEDRIVER_BINARY)
-    service = Service(executable_path=chromedriver_binary) if os.path.exists(chromedriver_binary) else None
-    try:
-        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
-    except Exception:
-        shutil.rmtree(user_data_dir, ignore_errors=True)
-        raise
-    driver.set_page_load_timeout(20)
-    driver.exchange_user_data_dir = user_data_dir
-    return driver
+from scrapers import get_cbr_currency, get_currency_cnbc, scrape_fintech_rows, session
 
 def sed_message(MESSAGE):
     for CHAT_ID in (OPERATOR_CHAT_ID,):
@@ -70,11 +30,9 @@ def sed_message(MESSAGE):
 load_dotenv()
 BOT_TOKEN = os.environ["EXCHANGE_DESK_BOT_TOKEN"]
 
-session = requests.Session()
-session.headers.update({"User-Agent": "Mozilla/5.0"})
 last_message_lock = threading.Lock()
 last_message = ""
-user_data = {}
+user_data = ConversationState()
 current_order_rates = {"dollar": None, "euro": None, "usdt": None}
 current_calc_rates = {"dollar": None, "euro": None, "usdt": None, "gbp": None}
 prev_val_dollar = None
@@ -113,70 +71,10 @@ currency_cache = {
     "updated_at": None
 }
 
-def get_cbr_currency():
-    try:
-        response = requests.get("https://www.cbr.ru/scripts/XML_daily.asp", timeout=10)
-        if response.ok:
-            soup = BeautifulSoup(response.content, "lxml-xml")
-            date = soup.find('ValCurs')['Date']
-            usd = soup.find('Valute', ID="R01235")
-            eur = soup.find('Valute', ID="R01239")
-            usd_value = float(usd.Value.text.replace(',', '.'))
-            eur_value = float(eur.Value.text.replace(',', '.'))
-            return {
-                "date": date,
-                "USD": usd_value,
-                "EUR": eur_value,
-                "GBP": cbr_valute_rate(soup, "R01035"),
-            }
-    except Exception as e:
-        print(f"Error fetching CBR data: {e}")
-    return None
-
-def get_currency_cnbc(symbol):
-    try:
-        response = session.get(f"https://www.cnbc.com/quotes/{symbol}", timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        price_element = soup.find("span", class_="QuoteStrip-lastPrice")
-        return float(price_element.text.strip()) if price_element else None
-    except Exception:
-        return None
-
-def get_binance_p2p():
-    try:
-        response = session.get(BINANCE_API_URL, params={'symbol': 'USDTRUB'}, timeout=10)
-        return round(float(response.json()['price']), 2) if response.ok else None
-    except Exception:
-        return None
-
 def get_currency_data_fintech():
     global fintech_fail_streak
-    driver = None
     try:
-        driver = get_driver()
-        driver.get("https://fintech-exchange.ru/")
-        time.sleep(5)
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-
-        table = soup.find("table")
-        rows = table.find_all("tr")[1:] if table else []
-        parsed = []
-        curs = set()
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) >= 4:
-                cur = cols[0].text.strip()
-                if cur not in curs:
-                    parsed.append({
-                        "currency": cur,
-                        "purchase": cols[1].text.strip(),
-                        "sale": cols[2].text.strip(),
-                        "volume": cols[3].text.strip()
-                    })
-                curs.add(cur)
-
-
-        currency_cache["data"] = parsed
+        currency_cache["data"] = scrape_fintech_rows()
         moscow_time = datetime.now(pytz.timezone("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S')
         currency_cache["updated_at"] = moscow_time
         print(f"[INFO] Updated cache at {currency_cache['updated_at']}")
@@ -190,15 +88,6 @@ def get_currency_data_fintech():
         if fintech_fail_streak == FINTECH_FAIL_ALERT_THRESHOLD:
             sed_message(f"⚠️ Не удаётся получить курс с fintech-exchange.ru уже {fintech_fail_streak} раза подряд: {e}")
         return currency_cache
-    finally:
-        if driver is not None:
-            user_data_dir = getattr(driver, "exchange_user_data_dir", None)
-            try:
-                driver.quit()
-            except Exception:
-                pass
-            if user_data_dir:
-                shutil.rmtree(user_data_dir, ignore_errors=True)
 
 def get_currency_data_ligovka():
     try:
@@ -216,7 +105,10 @@ def get_currency_data_ligovka():
                 {"currency": f"EUR ({amount})", "purchase": cols[5].text.strip(), "sale": cols[6].text.strip()},
                 {"currency": f"EUR/USD ({amount})", "purchase": cols[8].text.strip(), "sale": cols[9].text.strip()},
             ])
-        return parsed
+        return [
+            item for item in parsed
+            if try_parse_rate(item["purchase"]) is not None and try_parse_rate(item["sale"]) is not None
+        ]
     except requests.RequestException as e:
         print(f"[ERROR] Failed to fetch Ligovka data: {e}")
         return []
@@ -298,7 +190,6 @@ def update_message():
             usd_rub = get_currency_cnbc("RUB=")
             eur_usd = get_currency_cnbc("EUR=")
             gbp_usd = get_currency_cnbc("GBP=")
-            binance_p2p = get_binance_p2p()
             cbr = get_cbr_currency()
 
             message = "*📍 Online Курс:*\n"
@@ -376,7 +267,6 @@ def update_message():
                 if eur_usd_ligovka:
                     eur_usdt_buy = parse_rate(eur_usd_ligovka['purchase'])
                     eur_usdt_sell = parse_rate(eur_usd_ligovka['sale'])
-                    usdt_rates['eur'] = {'buy': eur_usdt_buy, 'sell': eur_usdt_sell}
                     message += (
                         f"• *EUR/USDT*\n"
                         f"  Покупка: `{eur_usdt_buy:.4f}` | Продажа: `{eur_usdt_sell:.4f}`\n\n"
@@ -393,8 +283,6 @@ def update_message():
                     except Exception:
                         continue
                 message += "\n"
-            # if binance_p2p:
-            #     message += f"• *USD/RUB P2P*: `{binance_p2p}`\n\n"
             if cbr:
                 gbp_line = f"• GBP/RUB: `{cbr['GBP']:.2f}`\n" if cbr.get("GBP") else ""
                 message += (
@@ -403,6 +291,7 @@ def update_message():
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
                     f"{gbp_line}\n"
                 )
+            message += updated_at_line()
             eur_ligovka = next((item for item in ligovka_data if item['currency'] == 'EUR (от 1)'), None)
             gbp_rate = gbp_calculator_rate(
                 gbp_usd, eur_usd, parse_rate(eur_ligovka['sale']) if eur_ligovka else None
@@ -427,6 +316,8 @@ def update_message():
         time.sleep(60)
 
 MAX_AMOUNT = 10_000_000
+
+NO_ACTIVE_FLOW_HINT = "Чтобы сделать заказ или посчитать в калькуляторе, откройте /currency и нажмите нужную кнопку."
 
 CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT", "gbp": "GBP"}
 CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt", "gbp": "gbp"}
@@ -506,7 +397,7 @@ def calc_pick_currency(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     currency = query.data.split("_", 1)[1]
-    user_data[query.message.chat_id] = {"mode": "calc", "currency": currency}
+    user_data.set(query.message.chat_id, {"mode": "calc", "currency": currency})
     query.message.reply_text(f"Введите сумму в {CALC_CURRENCY_LABELS[currency]}:")
 
 def callback_handler(update: Update, context: CallbackContext):
@@ -523,12 +414,16 @@ def callback_handler(update: Update, context: CallbackContext):
 def ask_amount(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
-    user_data[query.message.chat_id] = {"category": query.data}
+    user_data.set(query.message.chat_id, {"category": query.data})
     query.message.reply_text("Введите сумму:")
 
 def handle_amount(update: Update, context: CallbackContext):
     user_id = update.message.chat_id
     amount = update.message.text
+    state = user_data.get(user_id)
+    if not state:
+        update.message.reply_text(NO_ACTIVE_FLOW_HINT)
+        return
     if not re.match(r"^\d+(\.\d+)?$", amount):
         update.message.reply_text("Введите корректное число.")
         return
@@ -537,7 +432,7 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text(f"Введите сумму от 0 до {MAX_AMOUNT:.0f}.")
         return
 
-    state = user_data.pop(user_id, {})
+    user_data.pop(user_id)
     if state.get("mode") == "calc":
         with last_message_lock:
             rates = dict(current_calc_rates)
@@ -582,7 +477,7 @@ def handle_amount(update: Update, context: CallbackContext):
         f"Сумма: {amount}"
         f"{calculation}"
     )
-    print(message)
+    print(f"[ORDER] category={category} amount={amount}")
     try:
         context.bot.send_message(chat_id=OPERATOR_CHAT_ID, text=message)
         delivery_status = f"✅ Заказ отправлен оператору - {OPERATOR_CONTACT}"

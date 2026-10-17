@@ -74,3 +74,54 @@ def telegram_send(token, chat_id, text, timeout=10):
         return False, response.json().get("description", f"HTTP {response.status_code}")
     except ValueError:
         return False, f"HTTP {response.status_code}"
+
+
+def try_parse_rate(value):
+    try:
+        return parse_rate(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def updated_at_line(now=None):
+    import pytz
+    from datetime import datetime
+    now = now or datetime.now(pytz.timezone("Europe/Moscow"))
+    return f"🕒 Обновлено: {now:%H:%M} МСК\n"
+
+
+class ConversationState:
+    """Per-chat conversation state shared across handler threads; entries expire so abandoned flows don't pile up."""
+
+    def __init__(self, ttl_seconds=3600):
+        import threading
+        self._ttl = ttl_seconds
+        self._items = {}
+        self._lock = threading.Lock()
+
+    def _purge(self, now):
+        for key in [k for k, (ts, _) in self._items.items() if now - ts > self._ttl]:
+            del self._items[key]
+
+    def set(self, key, value):
+        now = time.monotonic()
+        with self._lock:
+            self._purge(now)
+            self._items[key] = (now, value)
+
+    def get(self, key, default=None):
+        now = time.monotonic()
+        with self._lock:
+            entry = self._items.get(key)
+            if entry is None or now - entry[0] > self._ttl:
+                self._items.pop(key, None)
+                return default
+            return entry[1]
+
+    def pop(self, key, default=None):
+        now = time.monotonic()
+        with self._lock:
+            entry = self._items.pop(key, None)
+        if entry is None or now - entry[0] > self._ttl:
+            return default
+        return entry[1]
