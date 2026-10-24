@@ -12,19 +12,24 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.remote.remote_connection import RemoteConnection
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate
+from bot_utils import (
+    escape_markdown_legacy, parse_rate, try_parse_rate, AlertCooldown, cbr_valute_rate, updated_at_line,
+)
 
 # Selenium setup
 DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
 DEFAULT_CHROMEDRIVER_BINARY = "/opt/chrome-for-testing/chromedriver-linux64/chromedriver"
 
 def get_driver():
+    # Selenium's default is no timeout: a wedged chromedriver would block the update thread forever.
+    RemoteConnection.set_timeout(60)
     options = Options()
     options.page_load_strategy = "eager"
     options.add_argument("--headless=new")
@@ -166,7 +171,8 @@ def get_currency_data_fintech():
             cols = row.find_all("td")
             if len(cols) >= 4:
                 cur = cols[0].text.strip()
-                if cur not in curs:
+                if cur not in curs and try_parse_rate(cols[1].text) is not None \
+                        and try_parse_rate(cols[2].text) is not None:
                     parsed.append({
                         "currency": cur,
                         "purchase": cols[1].text.strip(),
@@ -216,7 +222,10 @@ def get_currency_data_ligovka():
                 {"currency": f"EUR ({amount})", "purchase": cols[5].text.strip(), "sale": cols[6].text.strip()},
                 {"currency": f"EUR/USD ({amount})", "purchase": cols[8].text.strip(), "sale": cols[9].text.strip()},
             ])
-        return parsed
+        return [
+            item for item in parsed
+            if try_parse_rate(item["purchase"]) is not None and try_parse_rate(item["sale"]) is not None
+        ]
     except requests.RequestException as e:
         print(f"[ERROR] Failed to fetch Ligovka data: {e}")
         return []
@@ -403,6 +412,7 @@ def update_message():
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
                     f"{gbp_line}\n"
                 )
+            message += updated_at_line()
             eur_ligovka = next((item for item in ligovka_data if item['currency'] == 'EUR (от 1)'), None)
             gbp_rate = gbp_calculator_rate(
                 gbp_usd, eur_usd, parse_rate(eur_ligovka['sale']) if eur_ligovka else None
@@ -427,6 +437,8 @@ def update_message():
         time.sleep(60)
 
 MAX_AMOUNT = 10_000_000
+
+NO_ACTIVE_FLOW_HINT = "Чтобы сделать заказ или посчитать в калькуляторе, откройте /currency и нажмите нужную кнопку."
 
 CALC_CURRENCY_LABELS = {"rub": "RUB", "usd": "USD", "eur": "EUR", "usdt": "USDT", "gbp": "GBP"}
 CALC_RATE_KEYS = {"usd": "dollar", "eur": "euro", "usdt": "usdt", "gbp": "gbp"}
@@ -529,6 +541,10 @@ def ask_amount(update: Update, context: CallbackContext):
 def handle_amount(update: Update, context: CallbackContext):
     user_id = update.message.chat_id
     amount = update.message.text
+    state = user_data.get(user_id)
+    if not state:
+        update.message.reply_text(NO_ACTIVE_FLOW_HINT)
+        return
     if not re.match(r"^\d+(\.\d+)?$", amount):
         update.message.reply_text("Введите корректное число.")
         return
@@ -537,7 +553,7 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text(f"Введите сумму от 0 до {MAX_AMOUNT:.0f}.")
         return
 
-    state = user_data.pop(user_id, {})
+    user_data.pop(user_id, None)
     if state.get("mode") == "calc":
         with last_message_lock:
             rates = dict(current_calc_rates)

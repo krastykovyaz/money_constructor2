@@ -42,3 +42,17 @@ def cbr_valute_rate(soup, valute_id):
         return parse_rate(valute.Value.text) / parse_rate(valute.Nominal.text)
     except (AttributeError, ValueError, ZeroDivisionError):
         return None
+
+
+def try_parse_rate(value):
+    try:
+        return parse_rate(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def updated_at_line(now=None):
+    import pytz
+    from datetime import datetime
+    now = now or datetime.now(pytz.timezone("Europe/Moscow"))
+    return f"🕒 Обновлено: {now:%H:%M} МСК\n"

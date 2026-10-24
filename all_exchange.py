@@ -11,13 +11,14 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.remote.remote_connection import RemoteConnection
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate
+from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate, updated_at_line
 
 load_dotenv()
 TOKEN = os.environ["ALL_EXCHANGE_BOT_TOKEN"]
@@ -27,6 +28,8 @@ DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
 DEFAULT_CHROMEDRIVER_BINARY = "/opt/chrome-for-testing/chromedriver-linux64/chromedriver"
 
 def get_driver():
+    # Selenium's default is no timeout: a wedged chromedriver would block the update thread forever.
+    RemoteConnection.set_timeout(60)
     options = Options()
     options.page_load_strategy = "eager"
     options.add_argument("--headless=new")
@@ -75,6 +78,8 @@ prev_val_dollar = None
 prev_fintech_data = {}
 
 MAX_AMOUNT = 10_000_000
+
+NO_ACTIVE_FLOW_HINT = "Чтобы сделать заказ, откройте /currency и нажмите «Сделать заказ»."
 
 BINANCE_API_URL = "https://api.binance.com/api/v3/ticker/price"
 pairs_binance = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
@@ -237,6 +242,7 @@ def update_message():
                     f"• EUR/RUB: `{cbr['EUR']:.2f}`\n"
                     f"{gbp_line}\n"
                 )
+            message += updated_at_line()
             with last_message_lock:
                 last_message = message
             print('Updated currency at', datetime.now())
@@ -282,6 +288,10 @@ def ask_amount(update: Update, context: CallbackContext):
 def handle_amount(update: Update, context: CallbackContext):
     user_id = update.message.chat_id
     amount = update.message.text
+    state = user_data.get(user_id)
+    if not state:
+        update.message.reply_text(NO_ACTIVE_FLOW_HINT)
+        return
     if not re.match(r"^\d+(\.\d+)?$", amount):
         update.message.reply_text("Введите корректное число.")
         return
@@ -292,7 +302,8 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text(f"Максимальная сумма — {MAX_AMOUNT:.0f}.")
         return
 
-    category = user_data.pop(user_id, {}).get("category", "Неизвестная категория")
+    user_data.pop(user_id, None)
+    category = state.get("category", "Неизвестная категория")
     if update.message.from_user.username is not None:
         username = f"@{update.message.from_user.username}\n"
     else:
