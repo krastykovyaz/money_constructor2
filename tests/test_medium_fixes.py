@@ -4,6 +4,7 @@ import pytest
 
 import all_exchange
 import exchange_ligov_fintex_cbr_crypto as desk
+import scrapers
 from bot_utils import try_parse_rate, updated_at_line
 
 
@@ -33,8 +34,8 @@ def test_fintech_rows_with_unparseable_rates_are_dropped(monkeypatch, tmp_path):
     html = """<table><tr><th>h</th></tr>
     <tr><td>USD синий</td><td>86,20</td><td>86.60</td><td>от 5000</td></tr>
     <tr><td>EUR</td><td>—</td><td>97.50</td><td>от 5000</td></tr></table>"""
-    monkeypatch.setattr(desk, "get_driver", lambda: FakeDriver(html, str(tmp_path / "p")))
-    monkeypatch.setattr(desk.time, "sleep", lambda s: None)
+    monkeypatch.setattr(scrapers, "get_driver", lambda: FakeDriver(html, str(tmp_path / "p")))
+    monkeypatch.setattr(scrapers.time, "sleep", lambda s: None)
     monkeypatch.setattr(desk, "currency_cache", {"data": [], "updated_at": None})
     data = desk.get_currency_data_fintech()["data"]
     assert [row["currency"] for row in data] == ["USD синий"]
@@ -74,22 +75,22 @@ def _handle(module, text):
 @pytest.mark.parametrize("module", [all_exchange, desk])
 def test_number_without_active_flow_is_not_an_order(module):
     # Regression: any number typed by any user used to reach the operator as a "new order".
-    module.user_data.pop(99, None)
+    module.user_data.pop(99)
     message, bot = _handle(module, "6000")
     assert bot.sent == [] and message.replies == [module.NO_ACTIVE_FLOW_HINT]
 
 
 @pytest.mark.parametrize("module", [all_exchange, desk])
 def test_order_flow_still_reaches_operator_and_clears_state(module):
-    module.user_data[99] = {"category": "euro_choice"}
+    module.user_data.set(99, {"category": "euro_choice"})
     message, bot = _handle(module, "6000")
     assert len(bot.sent) == 1 and "6000" in bot.sent[0]
-    assert 99 not in module.user_data
+    assert module.user_data.get(99) is None
 
 
 @pytest.mark.parametrize("module", [all_exchange, desk])
 def test_invalid_amount_keeps_flow_open(module):
-    module.user_data[99] = {"category": "euro_choice"}
+    module.user_data.set(99, {"category": "euro_choice"})
     message, bot = _handle(module, "abc")
     assert bot.sent == [] and module.user_data.get(99) == {"category": "euro_choice"}
-    module.user_data.pop(99, None)
+    module.user_data.pop(99)

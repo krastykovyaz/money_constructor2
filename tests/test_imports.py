@@ -26,6 +26,7 @@ SCRIPTS = [
     "registration_bot",
     "sber_excange_bot",
     "sberexchange_bot",
+    "scrapers",
     "send_message_tg",
 ]
 

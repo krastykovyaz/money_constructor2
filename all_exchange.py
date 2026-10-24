@@ -1,62 +1,21 @@
 import os
-import shutil
-import tempfile
 import threading
 import requests
 import time
 import re
 import pytz
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.remote.remote_connection import RemoteConnection
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 )
 
-from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, cbr_valute_rate, updated_at_line
+from bot_utils import escape_markdown_legacy, parse_rate, AlertCooldown, ConversationState, updated_at_line
+from scrapers import get_cbr_currency, get_currency_cnbc, scrape_fintech_rows, session
 
 load_dotenv()
 TOKEN = os.environ["ALL_EXCHANGE_BOT_TOKEN"]
-
-# Selenium setup
-DEFAULT_CHROME_BINARY = "/opt/chrome-for-testing/chrome-linux64/chrome"
-DEFAULT_CHROMEDRIVER_BINARY = "/opt/chrome-for-testing/chromedriver-linux64/chromedriver"
-
-def get_driver():
-    # Selenium's default is no timeout: a wedged chromedriver would block the update thread forever.
-    RemoteConnection.set_timeout(60)
-    options = Options()
-    options.page_load_strategy = "eager"
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-software-rasterizer")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-features=site-per-process")
-    options.add_argument("--renderer-process-limit=1")
-    options.add_argument("--blink-settings=imagesEnabled=false")
-    options.add_argument("--js-flags=--max-old-space-size=128")
-    user_data_dir = tempfile.mkdtemp(prefix='exchange-chrome-')
-    options.add_argument(f"--user-data-dir={user_data_dir}")
-    chrome_binary = os.environ.get("CHROME_BINARY", DEFAULT_CHROME_BINARY)
-    if os.path.exists(chrome_binary):
-        options.binary_location = chrome_binary
-    chromedriver_binary = os.environ.get("CHROMEDRIVER_BINARY", DEFAULT_CHROMEDRIVER_BINARY)
-    service = Service(executable_path=chromedriver_binary) if os.path.exists(chromedriver_binary) else None
-    try:
-        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
-    except Exception:
-        shutil.rmtree(user_data_dir, ignore_errors=True)
-        raise
-    driver.set_page_load_timeout(20)
-    driver.exchange_user_data_dir = user_data_dir
-    return driver
 
 def sed_message(MESSAGE):
     CHAT_IDS = [8159819525]
@@ -69,11 +28,9 @@ def sed_message(MESSAGE):
             print(f"[ERROR] Failed to notify chat {CHAT_ID}: {type(e).__name__}")
         time.sleep(1)
 
-session = requests.Session()
-session.headers.update({"User-Agent": "Mozilla/5.0"})
 last_message_lock = threading.Lock()
 last_message = ""
-user_data = {}
+user_data = ConversationState()
 prev_val_dollar = None
 prev_fintech_data = {}
 
@@ -90,69 +47,9 @@ currency_cache = {
 
 rate_alert_cooldown = AlertCooldown(cooldown_seconds=300)
 
-def get_cbr_currency():
-    try:
-        response = requests.get("https://www.cbr.ru/scripts/XML_daily.asp", timeout=10)
-        if response.ok:
-            soup = BeautifulSoup(response.content, "lxml-xml")
-            date = soup.find('ValCurs')['Date']
-            usd = soup.find('Valute', ID="R01235")
-            eur = soup.find('Valute', ID="R01239")
-            usd_value = float(usd.Value.text.replace(',', '.'))
-            eur_value = float(eur.Value.text.replace(',', '.'))
-            return {
-                "date": date,
-                "USD": usd_value,
-                "EUR": eur_value,
-                "GBP": cbr_valute_rate(soup, "R01035"),
-            }
-    except Exception as e:
-        print(f"Error fetching CBR data: {e}")
-    return None
-
-def get_currency_cnbc(symbol):
-    try:
-        response = session.get(f"https://www.cnbc.com/quotes/{symbol}", timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        price_element = soup.find("span", class_="QuoteStrip-lastPrice")
-        return float(price_element.text.strip()) if price_element else None
-    except Exception:
-        return None
-
-def get_binance_p2p():
-    try:
-        response = session.get(BINANCE_API_URL, params={'symbol': 'USDTRUB'}, timeout=10)
-        return round(float(response.json()['price']), 2) if response.ok else None
-    except Exception:
-        return None
-
 def get_currency_data_fintech():
-    driver = None
     try:
-        driver = get_driver()
-        driver.get("https://fintech-exchange.ru/")
-        time.sleep(5)
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-
-        table = soup.find("table")
-        rows = table.find_all("tr")[1:] if table else []
-        parsed = []
-        curs = set()
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) >= 4:
-                cur = cols[0].text.strip()
-                if cur not in curs:
-                    parsed.append({
-                        "currency": cur,
-                        "purchase": cols[1].text.strip(),
-                        "sale": cols[2].text.strip(),
-                        "volume": cols[3].text.strip()
-                    })
-                curs.add(cur)
-
-
-        currency_cache["data"] = parsed
+        currency_cache["data"] = scrape_fintech_rows()
         moscow_time = datetime.now(pytz.timezone("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S')
         currency_cache["updated_at"] = moscow_time
         print(f"[INFO] Updated cache at {currency_cache['updated_at']}")
@@ -160,16 +57,6 @@ def get_currency_data_fintech():
     except Exception as e:
         print(f"[ERROR] Failed to fetch data: {e}")
         return currency_cache
-    finally:
-        if driver is not None:
-            user_data_dir = getattr(driver, "exchange_user_data_dir", None)
-            try:
-                driver.quit()
-            except Exception:
-                pass
-            if user_data_dir:
-                shutil.rmtree(user_data_dir, ignore_errors=True)
-
 
 def update_message():
     global last_message
@@ -181,7 +68,6 @@ def update_message():
             usd_rub = get_currency_cnbc("RUB=")
             eur_usd = get_currency_cnbc("EUR=")
             gbp_usd = get_currency_cnbc("GBP=")
-            binance_p2p = get_binance_p2p()
             cbr = get_cbr_currency()
 
             message = "*📍 Online Курс:*\n"
@@ -232,8 +118,6 @@ def update_message():
                     except Exception:
                         continue
                 message += "\n"
-            # if binance_p2p:
-            #     message += f"• *USD/RUB P2P*: `{binance_p2p}`\n\n"
             if cbr:
                 gbp_line = f"• GBP/RUB: `{cbr['GBP']:.2f}`\n" if cbr.get("GBP") else ""
                 message += (
@@ -282,7 +166,7 @@ def callback_handler(update: Update, context: CallbackContext):
 def ask_amount(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
-    user_data[query.message.chat_id] = {"category": query.data}
+    user_data.set(query.message.chat_id, {"category": query.data})
     query.message.reply_text("Введите сумму:")
 
 def handle_amount(update: Update, context: CallbackContext):
@@ -302,7 +186,7 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text(f"Максимальная сумма — {MAX_AMOUNT:.0f}.")
         return
 
-    user_data.pop(user_id, None)
+    user_data.pop(user_id)
     category = state.get("category", "Неизвестная категория")
     if update.message.from_user.username is not None:
         username = f"@{update.message.from_user.username}\n"
@@ -321,7 +205,7 @@ def handle_amount(update: Update, context: CallbackContext):
         update.message.reply_text("✅ У Вас не указан username напишите по заказу оператору - @oolyasya")
     else:
         update.message.reply_text("✅ Заказ отправлен оператору - @oolyasya")
-    print(message)
+    print(f"[ORDER] category={category} amount={amount}")
     context.bot.send_message(chat_id=8159819525, text=message)
 
 def on_error(update, context):
@@ -341,9 +225,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-

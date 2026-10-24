@@ -100,8 +100,8 @@ sudo systemctl enable --now chrome-tmp-cleanup.timer
 ```
 
 Logs: `journalctl -u exchange_desk -f` / `journalctl -u bot_all_exchange -f`.
-Journald retention on this host is capped to 3 days / 200MB via a drop-in at
-`/etc/systemd/journald.conf.d/retention.conf` (not part of this repo — a
+Journald retention on this host is capped to 300MB / 14 days via a drop-in at
+`/etc/systemd/journald.conf.d/size-limit.conf` (not part of this repo — a
 host-level setting).
 
 ## Other scripts
